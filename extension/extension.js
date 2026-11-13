@@ -19,6 +19,14 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 const RESTART_DELAYS_S = [1, 2, 5, 10, 30, 60];
+const ZOOM_CHOICES = [
+    ['system', 'Follow system text size'],
+    ['1', '100%'],
+    ['1.1', '110%'],
+    ['1.25', '125%'],
+    ['1.5', '150%'],
+    ['2', '200%'],
+];
 const DAEMON_WINDOW_TITLE = 'gnome-uebersicht'; // must match TITLE in uebersicht_daemon.py
 
 export default class UebersichtExtension extends Extension {
@@ -248,6 +256,16 @@ export default class UebersichtExtension extends Extension {
         menu.addMenuItem(this._widgetsSection);
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
+        // Widget size: follow GNOME's text scaling, or a fixed zoom.
+        this._zoomMenu = new PopupMenu.PopupSubMenuMenuItem('Widget size');
+        this._zoomItems = new Map();
+        for (const [mode, label] of ZOOM_CHOICES) {
+            const item = this._zoomMenu.menu.addAction(label, () => this._send(`zoom ${mode}`));
+            this._zoomItems.set(mode, item);
+        }
+        menu.addMenuItem(this._zoomMenu);
+        menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+
         menu.addAction('Refresh widgets', () => this._send('refresh'));
         menu.addAction('Reload widgets', () => this._send('reload'));
         menu.addAction('Open widgets folder', () => this._openWidgetsDir());
@@ -268,8 +286,19 @@ export default class UebersichtExtension extends Extension {
         }
         if (typeof status.desktopHidden === 'boolean')
             this._visibleItem?.setToggleState(!status.desktopHidden);
+        if (status.zoom !== undefined)
+            this._markZoom(String(status.zoom));
         if (Array.isArray(status.widgets))
             this._fillWidgets(status.widgets);
+    }
+
+    _markZoom(mode) {
+        // the daemon reports fixed zooms as numbers ("1.0" → "1")
+        const key = mode === 'system' ? mode : String(Number(mode));
+        for (const [m, item] of this._zoomItems ?? [])
+            item.setOrnament(m === key ? PopupMenu.Ornament.CHECK : PopupMenu.Ornament.NONE);
+        const label = ZOOM_CHOICES.find(([m]) => m === key)?.[1] ?? `${Math.round(Number(mode) * 100)}%`;
+        this._zoomMenu?.label.set_text(`Widget size: ${label}`);
     }
 
     _fillWidgets(widgets) {

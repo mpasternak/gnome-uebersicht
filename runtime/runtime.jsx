@@ -247,6 +247,10 @@ setInterval(scheduleRegion, 2000); // CSS animations / late-loading images
 window.__ubs = {
   sync,
   reload: (ids) => sync(ids || null),
+  resendRegion: () => {
+    lastRegion = "";
+    sendRegion();
+  },
   refreshAll: () => {
     for (const w of widgets.values()) w.refresh();
   },

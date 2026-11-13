@@ -8,6 +8,7 @@ It can also be started by hand for testing:  ./uebersicht_daemon.py --debug
 
 Control from the extension: lines on stdin —
   reload | refresh | hide | show | inspect | quit | widget-hide <id> | widget-show <id>
+  | zoom system|<factor>
 Status for the extension: lines on stdout prefixed with "@@ubs " followed by JSON.
 """
 
@@ -34,8 +35,10 @@ from ubs_core import (  # noqa: E402
     esbuild_argv,
     find_esbuild,
     load_state,
+    parse_zoom_mode,
     save_state,
     scale_rects,
+    webkit_zoom_level,
 )
 
 RUNTIME_DIR = HERE / "runtime"
@@ -85,6 +88,11 @@ class Daemon:
         self.pending_changes: set[str] = set()
         self.hidden = bool(load_state().get("desktop_hidden", False))
         self.hidden_widgets: set[str] = set(load_state().get("hidden_widgets", []))
+        self.zoom_mode = parse_zoom_mode(load_state().get("zoom"))
+        self.implicit_zoom = 1.0  # zoom WebKit applies by itself, measured from the viewport
+        self.zoom_settle_until = 0  # ignore viewport reports from before the last zoom change
+        self.iface = Gio.Settings.new("org.gnome.desktop.interface")
+        self.iface.connect("changed::text-scaling-factor", lambda *_: self._apply_zoom())
 
         self._build_window()
         self._watch_tree()
@@ -235,6 +243,24 @@ class Daemon:
         self._announce()
         return GLib.SOURCE_REMOVE
 
+    def _apply_zoom(self):
+        text_scale = self.iface.get_double("text-scaling-factor")
+        level = webkit_zoom_level(self.zoom_mode, text_scale, self.implicit_zoom)
+        if abs(level - self.view.get_zoom_level()) > 0.005:
+            log(f"zoom: mode={self.zoom_mode} text={text_scale:.2f} implicit={self.implicit_zoom:.3f} → {level:.3f}")
+            self.view.set_zoom_level(level)  # the page resizes and resends its region
+            self.zoom_settle_until = GLib.get_monotonic_time() + 500_000
+            # WebKit may also react to the same setting by itself; re-measure once settled
+            GLib.timeout_add(600, lambda: self.js("window.__ubs && window.__ubs.resendRegion()") and False)
+
+    def _set_zoom_mode(self, value):
+        self.zoom_mode = parse_zoom_mode(value)
+        state = load_state()
+        state["zoom"] = self.zoom_mode
+        save_state(state)
+        self._apply_zoom()
+        self._announce()
+
     def _apply_hidden(self):
         self.js(f"window.__ubs && window.__ubs.setHidden({json.dumps(self.hidden)})")
 
@@ -244,7 +270,8 @@ class Daemon:
     def _announce(self):
         """Tell the extension which widgets exist and which are hidden."""
         widgets = [{"id": i, "hidden": i in self.hidden_widgets} for i in self.widgets.ids()]
-        print("@@ubs " + json.dumps({"widgets": widgets, "desktopHidden": self.hidden}), flush=True)
+        status = {"widgets": widgets, "desktopHidden": self.hidden, "zoom": self.zoom_mode}
+        print("@@ubs " + json.dumps(status), flush=True)
 
     def _set_widget_hidden(self, wid: str, hidden: bool):
         if hidden:
@@ -277,7 +304,12 @@ class Daemon:
             self._reply(reply, value, {"ids": self.visible_ids(), "hidden": self.hidden})
         elif op == "region":
             alloc = (self.view.get_allocated_width(), self.view.get_allocated_height())
-            self._set_region(scale_rects(msg.get("rects") or [], msg.get("viewport"), alloc))
+            viewport = msg.get("viewport")
+            settled = GLib.get_monotonic_time() >= self.zoom_settle_until
+            if settled and viewport and viewport[0] > 0 and alloc[0] > 0:
+                self.implicit_zoom = alloc[0] / (viewport[0] * self.view.get_zoom_level())
+                self._apply_zoom()
+            self._set_region(scale_rects(msg.get("rects") or [], viewport, alloc))
             self._reply(reply, value, {"ok": True})
         else:
             self._reply(reply, value, {"error": f"unknown operation {op!r}"})
@@ -361,7 +393,9 @@ class Daemon:
             return False
         cmd, _, arg = line.strip().partition(" ")
         log("command:", cmd, arg)
-        if cmd in ("widget-hide", "widget-show") and arg:
+        if cmd == "zoom" and arg:
+            self._set_zoom_mode(arg)
+        elif cmd in ("widget-hide", "widget-show") and arg:
             self._set_widget_hidden(arg, cmd == "widget-hide")
         elif cmd == "reload":
             self.js("window.__ubs && window.__ubs.reload(null)")

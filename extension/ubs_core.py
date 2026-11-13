@@ -115,3 +115,29 @@ def scale_rects(rects, viewport, window_size) -> list[tuple[int, int, int, int]]
         x1, y1 = math.ceil((x + w) * sx), math.ceil((y + h) * sy)
         out.append((x0, y0, x1 - x0, y1 - y0))
     return out
+
+
+ZOOM_SYSTEM = "system"
+ZOOM_PRESETS = (1.0, 1.1, 1.25, 1.5, 2.0)
+
+
+def parse_zoom_mode(value) -> str | float:
+    """'system' (follow GNOME's text scaling) or a fixed factor such as 1.25."""
+    if value == ZOOM_SYSTEM or value is None:
+        return ZOOM_SYSTEM
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return ZOOM_SYSTEM
+    return f if 0.25 <= f <= 5 else ZOOM_SYSTEM
+
+
+def webkit_zoom_level(mode, text_scale: float, implicit: float) -> float:
+    """Zoom level to give WebKit so widgets end up at the wanted size.
+
+    `implicit` is the zoom WebKit already applies on its own (it may or may not
+    follow GNOME's text scaling); the result compensates for it."""
+    target = text_scale if mode == ZOOM_SYSTEM else float(mode)
+    if not target or target <= 0:
+        target = 1.0
+    return target / (implicit if implicit and implicit > 0 else 1.0)

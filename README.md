@@ -93,6 +93,10 @@ Supported:
 - `localStorage` (persistent), links open in the default browser
 - `*.jsx` files and `*.widget/index.jsx` folders; `node_modules`, `lib`, `src` and dot/underscore files are skipped
 
+Widget size follows GNOME's display scale and text scaling factor (Settings →
+Accessibility → Large Text) live; the top bar menu → *Widget size* can pin it
+to a fixed zoom instead (100–200%).
+
 Not supported (yet): legacy CoffeeScript widgets, per-widget screen selection,
 multiple monitors (widgets render on the primary monitor).
 

@@ -105,5 +105,28 @@ class ScaleRectsTest(unittest.TestCase):
         self.assertEqual(ubs_core.scale_rects([(1, 2, 3, 4)], (0, 0), (50, 50)), [(1, 2, 3, 4)])
 
 
+class ZoomTest(unittest.TestCase):
+    def test_parse_zoom_mode(self):
+        self.assertEqual(ubs_core.parse_zoom_mode("system"), "system")
+        self.assertEqual(ubs_core.parse_zoom_mode(None), "system")
+        self.assertEqual(ubs_core.parse_zoom_mode("1.25"), 1.25)
+        self.assertEqual(ubs_core.parse_zoom_mode(1.5), 1.5)
+        self.assertEqual(ubs_core.parse_zoom_mode("junk"), "system")
+        self.assertEqual(ubs_core.parse_zoom_mode("99"), "system")
+
+    def test_system_mode_follows_text_scale(self):
+        # WebKit already zooms by 1.1 on its own → nothing extra needed
+        self.assertAlmostEqual(ubs_core.webkit_zoom_level("system", 1.1, 1.1), 1.0)
+        # WebKit ignores text scaling → we apply it
+        self.assertAlmostEqual(ubs_core.webkit_zoom_level("system", 1.5, 1.0), 1.5)
+
+    def test_fixed_mode_compensates_implicit_zoom(self):
+        self.assertAlmostEqual(ubs_core.webkit_zoom_level(1.0, 1.1, 1.1), 1 / 1.1)
+        self.assertAlmostEqual(ubs_core.webkit_zoom_level(1.25, 1.1, 1.0), 1.25)
+
+    def test_bad_inputs_fall_back_to_one(self):
+        self.assertAlmostEqual(ubs_core.webkit_zoom_level("system", 0, 0), 1.0)
+
+
 if __name__ == "__main__":
     unittest.main()
