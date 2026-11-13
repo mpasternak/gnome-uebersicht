@@ -19,6 +19,7 @@ import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 
 const RESTART_DELAYS_S = [1, 2, 5, 10, 30, 60];
+const DAEMON_WINDOW_TITLE = 'gnome-uebersicht'; // must match TITLE in uebersicht_daemon.py
 
 export default class UebersichtExtension extends Extension {
     enable() {
@@ -173,7 +174,9 @@ export default class UebersichtExtension extends Extension {
         } catch {
             // owns_window() throws for X11 windows — those are never ours
         }
-        if (!ours)
+        // Only the main daemon window becomes the desktop layer; others (the web
+        // inspector) stay normal windows.
+        if (!ours || win.get_title() !== DAEMON_WINDOW_TITLE)
             return;
         this._releaseWindow();
         this._window = win;

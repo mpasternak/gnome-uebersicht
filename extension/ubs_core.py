@@ -4,6 +4,7 @@ so it can be unit-tested anywhere."""
 from __future__ import annotations
 
 import json
+import math
 import os
 import shutil
 from pathlib import Path
@@ -96,3 +97,21 @@ class Widgets:
 
     def visible(self, hidden: set[str]) -> list[str]:
         return [i for i in self.ids() if i not in hidden]
+
+
+def scale_rects(rects, viewport, window_size) -> list[tuple[int, int, int, int]]:
+    """Map rectangles from CSS pixels to window (logical) pixels.
+
+    WebKit may zoom the page (e.g. GNOME's text scaling factor 1.1 makes CSS
+    pixels 10% larger), so the input region must be scaled by window/viewport.
+    Rounds outwards so a widget's clickable area is never smaller than drawn."""
+    vw, vh = viewport if viewport else (0, 0)
+    ww, wh = window_size
+    sx = ww / vw if vw and ww else 1.0
+    sy = wh / vh if vh and wh else 1.0
+    out = []
+    for x, y, w, h in rects:
+        x0, y0 = math.floor(x * sx), math.floor(y * sy)
+        x1, y1 = math.ceil((x + w) * sx), math.ceil((y + h) * sy)
+        out.append((x0, y0, x1 - x0, y1 - y0))
+    return out

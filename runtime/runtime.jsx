@@ -222,10 +222,11 @@ function collectRects() {
 function sendRegion() {
   regionTimer = null;
   const rects = collectRects();
-  const key = JSON.stringify(rects);
+  const key = JSON.stringify([rects, window.innerWidth, window.innerHeight]);
   if (key === lastRegion) return;
   lastRegion = key;
-  bridge({ op: "region", rects }).catch(() => {});
+  // viewport lets the daemon convert CSS px to window px when WebKit zooms the page
+  bridge({ op: "region", rects, viewport: [window.innerWidth, window.innerHeight] }).catch(() => {});
 }
 function scheduleRegion() {
   if (!regionTimer) regionTimer = setTimeout(sendRegion, 120);

@@ -35,6 +35,7 @@ from ubs_core import (  # noqa: E402
     find_esbuild,
     load_state,
     save_state,
+    scale_rects,
 )
 
 RUNTIME_DIR = HERE / "runtime"
@@ -132,6 +133,16 @@ class Daemon:
         self.win.show_all()
 
         self.view.load_uri(f"{SCHEME}://app/")
+
+    def _show_inspector(self):
+        inspector = self.view.get_inspector()
+        if not getattr(self, "_inspector_detached", False):
+            # Docking would put the inspector inside the desktop window: below all
+            # windows and outside the click-through input region. Keep it separate.
+            inspector.connect("attach", lambda *_: True)
+            self._inspector_detached = True
+        inspector.show()
+        inspector.detach()
 
     def _monitor_geometry(self):
         disp = Gdk.Display.get_default()
@@ -265,7 +276,8 @@ class Daemon:
         elif op == "list":
             self._reply(reply, value, {"ids": self.visible_ids(), "hidden": self.hidden})
         elif op == "region":
-            self._set_region(msg.get("rects") or [])
+            alloc = (self.view.get_allocated_width(), self.view.get_allocated_height())
+            self._set_region(scale_rects(msg.get("rects") or [], msg.get("viewport"), alloc))
             self._reply(reply, value, {"ok": True})
         else:
             self._reply(reply, value, {"error": f"unknown operation {op!r}"})
@@ -362,7 +374,7 @@ class Daemon:
             save_state(state)
             self._apply_hidden()
         elif cmd == "inspect":
-            self.view.get_inspector().show()
+            self._show_inspector()
         elif cmd == "quit":
             Gtk.main_quit()
         return True
@@ -375,6 +387,7 @@ def main():
     ap.add_argument("--debug", action="store_true", help="regular decorated window, no click-through")
     ap.add_argument("--stdin-control", action="store_true", help="read control commands from stdin (extension)")
     ap.add_argument("--dump-after", type=float, default=0, help="(testing) print page text after N s, exit")
+    ap.add_argument("--dump-js", default=None, help="(testing) JS file whose result --dump-after prints")
     args = ap.parse_args()
     GLib.set_prgname("gnome-uebersicht")
     d = Daemon(args)
@@ -390,10 +403,26 @@ def main():
                     log("dump:", e.message)
                 Gtk.main_quit()
 
-            d.view.evaluate_javascript(
+            default_js = (
                 "JSON.stringify({text: document.body.innerText,"
                 " html: document.getElementById('ubs-root').innerHTML.slice(0, 600),"
-                " ls: localStorage.length})",
+                " ls: localStorage.length})"
+            )
+            if args.dump_js:
+                # the file is an async function body: may `await`, must `return` a string
+                body = Path(args.dump_js).read_text()
+
+                def got_async(view, res):
+                    try:
+                        print(view.call_async_javascript_function_finish(res).to_string(), flush=True)
+                    except GLib.Error as e:
+                        log("dump:", e.message)
+                    Gtk.main_quit()
+
+                d.view.call_async_javascript_function(body, -1, None, None, None, None, got_async)
+                return False
+            d.view.evaluate_javascript(
+                default_js,
                 -1,
                 None,
                 None,

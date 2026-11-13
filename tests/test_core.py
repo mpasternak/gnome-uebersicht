@@ -89,5 +89,21 @@ class EsbuildTest(unittest.TestCase):
             self.assertEqual(ubs_core.find_esbuild(str(exe)), str(exe))
 
 
+class ScaleRectsTest(unittest.TestCase):
+    def test_identity_without_zoom(self):
+        self.assertEqual(ubs_core.scale_rects([(10, 20, 30, 40)], (100, 100), (100, 100)), [(10, 20, 30, 40)])
+
+    def test_text_scaling_zoom(self):
+        # GNOME text-scaling-factor 1.1: viewport 2792 CSS px inside a 3072 px window
+        [(x, y, w, h)] = ubs_core.scale_rects([(731.2, 100.2, 13.6, 15.5)], (2792, 1477), (3072, 1728))
+        self.assertLessEqual(x, 731.2 * 3072 / 2792)
+        self.assertGreaterEqual(x + w, (731.2 + 13.6) * 3072 / 2792)
+        self.assertGreaterEqual(y + h, (100.2 + 15.5) * 1728 / 1477)
+
+    def test_missing_viewport_falls_back_to_identity(self):
+        self.assertEqual(ubs_core.scale_rects([(1, 2, 3, 4)], None, (50, 50)), [(1, 2, 3, 4)])
+        self.assertEqual(ubs_core.scale_rects([(1, 2, 3, 4)], (0, 0), (50, 50)), [(1, 2, 3, 4)])
+
+
 if __name__ == "__main__":
     unittest.main()
