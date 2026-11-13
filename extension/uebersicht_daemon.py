@@ -16,7 +16,6 @@ import ctypes
 import json
 import mimetypes
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -27,12 +26,20 @@ gi.require_version("Gdk", "3.0")
 gi.require_version("WebKit2", "4.1")
 gi.require_version("JavaScriptCore", "4.1")
 from gi.repository import Gdk, Gio, GLib, Gtk, JavaScriptCore, WebKit2  # noqa: E402
+from ubs_core import (  # noqa: E402
+    HERE,
+    SKIP_DIRS,
+    Widgets,
+    default_widgets_dir,
+    esbuild_argv,
+    find_esbuild,
+    load_state,
+    save_state,
+)
 
-HERE = Path(__file__).resolve().parent
 RUNTIME_DIR = HERE / "runtime"
 SCHEME = "ubersicht"
 TITLE = "gnome-uebersicht"
-SKIP_DIRS = {"node_modules", "lib", "src", ".git"}
 RUN_TIMEOUT_S = 120
 
 
@@ -64,74 +71,6 @@ def log(*a):
     print("[ubs]", *a, file=sys.stderr, flush=True)
 
 
-def state_file() -> Path:
-    return Path(GLib.get_user_state_dir()) / "gnome-uebersicht" / "state.json"
-
-
-def load_state() -> dict:
-    try:
-        return json.loads(state_file().read_text())
-    except (OSError, ValueError):
-        return {}
-
-
-def save_state(state: dict) -> None:
-    f = state_file()
-    f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_suffix(".tmp")
-    tmp.write_text(json.dumps(state, indent=2))
-    tmp.replace(f)
-
-
-def default_widgets_dir() -> Path:
-    env = os.environ.get("UBERSICHT_WIDGETS_DIR")
-    if env:
-        return Path(env).expanduser()
-    return Path(GLib.get_user_data_dir()) / "uebersicht" / "widgets"
-
-
-def find_esbuild(explicit: str | None) -> str | None:
-    cands = [explicit, os.environ.get("UBERSICHT_ESBUILD")]
-    # the extension is usually a symlink into the repo — node_modules lives in the repo root
-    for base in (HERE, HERE.parent):
-        cands.append(str(base / "node_modules" / ".bin" / "esbuild"))
-    cands.append(shutil.which("esbuild"))
-    for c in cands:
-        if c and os.access(c, os.X_OK):
-            return c
-    return None
-
-
-class Widgets:
-    """Widget discovery in a directory (following Übersicht conventions)."""
-
-    def __init__(self, root: Path):
-        self.root = root
-
-    def ids(self) -> list[str]:
-        out = []
-        if not self.root.is_dir():
-            return out
-        for dirpath, dirnames, filenames in os.walk(self.root, followlinks=True):
-            dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not d.startswith("."))
-            rel = Path(dirpath).relative_to(self.root)
-            in_widget_dir = any(p.endswith(".widget") for p in rel.parts)
-            for f in sorted(filenames):
-                if f.startswith((".", "_")):
-                    continue
-                if f.endswith(".jsx") or (in_widget_dir and f in ("index.js", "index.jsx")):
-                    out.append(str(rel / f) if str(rel) != "." else f)
-        return sorted(set(out))
-
-    def path(self, wid: str) -> Path | None:
-        p = (self.root / wid).resolve()
-        try:
-            p.relative_to(self.root.resolve())
-        except ValueError:
-            return None
-        return p if p.is_file() else None
-
-
 class Daemon:
     def __init__(self, args):
         self.args = args
@@ -155,9 +94,7 @@ class Daemon:
     def _build_window(self):
         data_dir = Path(GLib.get_user_data_dir()) / "gnome-uebersicht"
         cache_dir = Path(GLib.get_user_cache_dir()) / "gnome-uebersicht"
-        mgr = WebKit2.WebsiteDataManager(
-            base_data_directory=str(data_dir), base_cache_directory=str(cache_dir)
-        )
+        mgr = WebKit2.WebsiteDataManager(base_data_directory=str(data_dir), base_cache_directory=str(cache_dir))
         ctx = WebKit2.WebContext.new_with_website_data_manager(mgr)
         ctx.register_uri_scheme(SCHEME, self._on_scheme)
         sec = ctx.get_security_manager()
@@ -227,7 +164,7 @@ class Daemon:
         if path in ("/", "/index.html"):
             f = RUNTIME_DIR / "index.html"
         elif path.startswith("/__ubs/"):
-            f = (RUNTIME_DIR / path[len("/__ubs/"):]).resolve()
+            f = (RUNTIME_DIR / path[len("/__ubs/") :]).resolve()
             if RUNTIME_DIR.resolve() not in f.parents:
                 f = None
         else:
@@ -291,7 +228,7 @@ class Daemon:
         self.js(f"window.__ubs && window.__ubs.setHidden({json.dumps(self.hidden)})")
 
     def visible_ids(self) -> list[str]:
-        return [i for i in self.widgets.ids() if i not in self.hidden_widgets]
+        return self.widgets.visible(self.hidden_widgets)
 
     def _announce(self):
         """Tell the extension which widgets exist and which are hidden."""
@@ -340,7 +277,8 @@ class Daemon:
 
     def _spawn(self, argv, cwd, done, stdin_text=None):
         launcher = Gio.SubprocessLauncher.new(
-            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
+            Gio.SubprocessFlags.STDOUT_PIPE
+            | Gio.SubprocessFlags.STDERR_PIPE
             | (Gio.SubprocessFlags.STDIN_PIPE if stdin_text is not None else 0)
         )
         launcher.set_cwd(str(cwd))
@@ -381,13 +319,7 @@ class Daemon:
         if not self.esbuild:
             done({"error": "esbuild not found — run `npm install` in the gnome-uebersicht repository"})
             return
-        argv = [
-            self.esbuild, str(p), "--bundle", "--format=cjs", "--platform=browser", "--target=es2020",
-            "--jsx=transform", "--jsx-factory=__ubsReact.createElement", "--jsx-fragment=__ubsReact.Fragment",
-            "--loader:.js=jsx", "--sourcemap=inline", "--log-level=error", "--charset=utf8",
-            "--external:uebersicht", "--external:react", "--external:react-dom", "--external:react-dom/client",
-            "--external:@emotion/css", "--external:@emotion/styled",
-        ]
+        argv = esbuild_argv(self.esbuild, p)
 
         def fin(r):
             if r["status"] == 0:
@@ -441,13 +373,14 @@ def main():
     ap.add_argument("--widgets", default=str(default_widgets_dir()), help="widgets directory")
     ap.add_argument("--esbuild", default=None, help="path to the esbuild binary")
     ap.add_argument("--debug", action="store_true", help="regular decorated window, no click-through")
-    ap.add_argument("--stdin-control", action="store_true", help="read control commands from stdin (used by the extension)")
-    ap.add_argument("--dump-after", type=float, default=0, help="(testing) after N seconds print the page text and exit")
+    ap.add_argument("--stdin-control", action="store_true", help="read control commands from stdin (extension)")
+    ap.add_argument("--dump-after", type=float, default=0, help="(testing) print page text after N s, exit")
     args = ap.parse_args()
     GLib.set_prgname("gnome-uebersicht")
     d = Daemon(args)
     log("widgets from", args.widgets)
     if args.dump_after:
+
         def dump():
             def got(view, res):
                 try:
@@ -456,11 +389,19 @@ def main():
                 except GLib.Error as e:
                     log("dump:", e.message)
                 Gtk.main_quit()
+
             d.view.evaluate_javascript(
-                "JSON.stringify({text: document.body.innerText, html: document.getElementById('ubs-root').innerHTML.slice(0, 600),"
+                "JSON.stringify({text: document.body.innerText,"
+                " html: document.getElementById('ubs-root').innerHTML.slice(0, 600),"
                 " ls: localStorage.length})",
-                -1, None, None, None, got)
+                -1,
+                None,
+                None,
+                None,
+                got,
+            )
             return False
+
         GLib.timeout_add(int(args.dump_after * 1000), dump)
     Gtk.main()
 

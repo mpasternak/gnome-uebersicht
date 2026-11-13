@@ -28,8 +28,10 @@ GNOME Shell extension ──launches──▶ daemon (Python, GTK3 + WebKitGTK)
 - **extension/uebersicht_daemon.py** — WebKitGTK window, `ubersicht://` scheme
   serving the runtime and widget assets, JS bridge for `run`/compile, file
   watcher with hot reload.
-- **runtime/runtime.jsx** — the widget runtime, bundled into
-  `extension/runtime/runtime.js`.
+- **extension/ubs_core.py** — the daemon's pure-Python parts (widget discovery,
+  state, esbuild invocation), importable without GTK.
+- **runtime/runtime.jsx** + **runtime/core.js** — the widget runtime (DOM layer +
+  DOM-free state machine), bundled into `extension/runtime/runtime.js`.
 
 Only changes to `extension.js` require logging out (Wayland cannot restart
 GNOME Shell in place). Daemon/runtime changes: top bar menu → *Restart daemon*.
@@ -40,11 +42,25 @@ Widget changes: picked up automatically.
 Requirements: GNOME Shell 48–50, `python3-gi`, `gir1.2-webkit2-4.1`, Node.js/npm
 (build time only, plus the `esbuild` binary at runtime).
 
+From a checkout (development, the extension is symlinked to the repo):
+
 ```sh
 ./install.sh
 # log out and back in (Wayland), then:
 gnome-extensions enable uebersicht@local
 ```
+
+From a [release](https://github.com/mpasternak/gnome-uebersicht/releases) zip
+(needs `esbuild` on `PATH`, e.g. `npm install -g esbuild`):
+
+```sh
+gnome-extensions install gnome-uebersicht.zip
+# log out and back in, then:
+gnome-extensions enable uebersicht@local
+```
+
+Publishing on extensions.gnome.org is tracked in
+[#1](https://github.com/mpasternak/gnome-uebersicht/issues/1).
 
 Widgets live in `~/.local/share/uebersicht/widgets`
 (override with `UBERSICHT_WIDGETS_DIR`).
@@ -79,6 +95,19 @@ Supported:
 
 Not supported (yet): legacy CoffeeScript widgets, per-widget screen selection,
 multiple monitors (widgets render on the primary monitor).
+
+## Development
+
+```sh
+npm ci
+npm run lint && npm run build && npm test     # JS: eslint, bundle, node --test
+python3 -m unittest discover -s tests         # Python: daemon core
+uvx ruff check extension tests                # Python lint
+pre-commit install                            # optional git hooks
+```
+
+CI runs all of the above on every push and builds the extension zip; pushing a
+`v*` tag publishes it as a GitHub release.
 
 ## Relationship to Übersicht
 

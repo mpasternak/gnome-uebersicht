@@ -134,7 +134,9 @@ export default class UebersichtExtension extends Extension {
         this._proc = this._client = null;
         try {
             this._stdin?.close(null);
-        } catch {}
+        } catch {
+            // already closed by the dying process
+        }
         this._stdin = null;
         proc.force_exit();
     }
@@ -168,7 +170,9 @@ export default class UebersichtExtension extends Extension {
         let ours = false;
         try {
             ours = this._client.owns_window(win);
-        } catch {}
+        } catch {
+            // owns_window() throws for X11 windows — those are never ours
+        }
         if (!ours)
             return;
         this._releaseWindow();

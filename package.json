@@ -4,7 +4,9 @@
   "version": "0.1.0",
   "description": "Übersicht-compatible desktop widgets for GNOME Shell (Wayland)",
   "scripts": {
-    "build": "esbuild runtime/runtime.jsx --bundle --format=iife --minify --target=es2020 --define:process.env.NODE_ENV=\\\"production\\\" --outfile=extension/runtime/runtime.js"
+    "build": "esbuild runtime/runtime.jsx --bundle --format=iife --minify --target=es2020 --define:process.env.NODE_ENV=\\\"production\\\" --outfile=extension/runtime/runtime.js",
+    "test": "node --test tests/*.test.js",
+    "lint": "eslint extension runtime tests"
   },
   "dependencies": {
     "@emotion/css": "^11.13.5",
@@ -14,6 +16,11 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "esbuild": "^0.24.2"
-  }
+    "@eslint/js": "^9.39.5",
+    "esbuild": "^0.24.2",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react": "^7.37.5",
+    "globals": "^17.14.0"
+  },
+  "type": "module"
 }

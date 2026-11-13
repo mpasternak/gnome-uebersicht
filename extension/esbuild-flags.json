@@ -1,0 +1,19 @@
+[
+  "--bundle",
+  "--format=cjs",
+  "--platform=browser",
+  "--target=es2020",
+  "--jsx=transform",
+  "--jsx-factory=__ubsReact.createElement",
+  "--jsx-fragment=__ubsReact.Fragment",
+  "--loader:.js=jsx",
+  "--sourcemap=inline",
+  "--log-level=error",
+  "--charset=utf8",
+  "--external:uebersicht",
+  "--external:react",
+  "--external:react-dom",
+  "--external:react-dom/client",
+  "--external:@emotion/css",
+  "--external:@emotion/styled"
+]

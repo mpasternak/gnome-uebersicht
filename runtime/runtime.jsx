@@ -17,6 +17,7 @@ import * as ReactDOM from "react-dom";
 import { createRoot } from "react-dom/client";
 import { css, cx, injectGlobal, keyframes } from "@emotion/css";
 import styled from "@emotion/styled";
+import { WidgetController, evaluateWidget } from "./core.js";
 
 // ---------------------------------------------------------------- daemon bridge
 function bridge(msg) {
@@ -64,9 +65,6 @@ function wrapperClass(className) {
   return BASE;
 }
 
-const defaultUpdate = (event, prev) =>
-  "output" in event || "error" in event ? { ...prev, output: event.output, error: event.error } : prev;
-
 const errorBox = (title, text) => (
   <div
     style={{
@@ -106,9 +104,9 @@ class Boundary extends React.Component {
 class Widget {
   constructor(id) {
     this.id = id;
-    this.timer = null;
     this.alive = true;
     this.tick = 0;
+    this.ctl = null;
     this.el = document.createElement("div");
     this.el.id = id.replace(/[^A-Za-z0-9_-]/g, "-");
     this.el.dataset.widget = id;
@@ -119,36 +117,18 @@ class Widget {
   mount(code) {
     let mod;
     try {
-      const module = { exports: {} };
-      // eslint-disable-next-line no-new-func
-      new Function("module", "exports", "require", `${code}\n//# sourceURL=widget://${this.id}`)(
-        module,
-        module.exports,
-        window.require
-      );
-      mod = module.exports;
+      mod = evaluateWidget(code, this.id, window.require);
     } catch (e) {
       return this.fail("Load error", e);
     }
-    this.mod = mod;
     this.el.className = "ubs-widget " + wrapperClass(mod.className);
-    this.state = mod.initialState !== undefined ? mod.initialState : { output: "", error: null };
-    this.dispatch = (event) => {
-      if (!this.alive) return;
-      try {
-        this.state = (mod.updateState || defaultUpdate)(event, this.state);
-      } catch (e) {
-        console.error(this.id, e);
-      }
-      this.render();
-    };
-    this.render();
-    try {
-      if (typeof mod.init === "function") mod.init(this.dispatch);
-    } catch (e) {
-      console.error(this.id, "init", e);
-    }
-    this.refresh();
+    this.ctl = new WidgetController({
+      id: this.id,
+      mod,
+      run,
+      render: (state, dispatch) => this.render(mod, state, dispatch),
+    });
+    this.ctl.start();
   }
 
   fail(title, e) {
@@ -156,14 +136,12 @@ class Widget {
     this.root.render(errorBox(`${this.id}: ${title}`, String((e && e.stack) || e)));
   }
 
-  render() {
-    const mod = this.mod;
+  render(mod, state, dispatch) {
+    if (!this.alive) return;
     this.tick++;
     let vdom;
     try {
-      vdom = mod.render
-        ? mod.render(this.state, this.dispatch)
-        : <pre style={{ margin: 0 }}>{this.state && this.state.output}</pre>;
+      vdom = mod.render ? mod.render(state, dispatch) : <pre style={{ margin: 0 }}>{state && state.output}</pre>;
       // render may return an HTML string (older widget style)
       if (typeof vdom === "string") vdom = <div dangerouslySetInnerHTML={{ __html: vdom }} />;
     } catch (e) {
@@ -177,34 +155,15 @@ class Widget {
   }
 
   refresh() {
-    clearTimeout(this.timer);
-    if (!this.alive) return;
-    const mod = this.mod;
-    const freq = mod.refreshFrequency === undefined ? 1000 : mod.refreshFrequency;
-    const next = () => {
-      if (this.alive && freq !== false && freq > 0) this.timer = setTimeout(() => this.refresh(), freq);
-    };
-    if (typeof mod.command === "function") {
-      try {
-        mod.command(this.dispatch);
-      } catch (e) {
-        console.error(this.id, e);
-      }
-      next();
-    } else if (typeof mod.command === "string" && mod.command.trim()) {
-      run(mod.command)
-        .then((output) => this.dispatch({ type: "UB/COMMAND_RAN", output, error: null }))
-        .catch((e) => this.dispatch({ type: "UB/COMMAND_RAN", output: e.stdout || "", error: e.message }))
-        .finally(next);
-    }
+    if (this.ctl) this.ctl.refresh();
   }
 
   destroy() {
     this.alive = false;
-    clearTimeout(this.timer);
+    if (this.ctl) this.ctl.destroy();
     try {
       this.root.unmount();
-    } catch (e) {
+    } catch {
       /* already unmounted */
     }
     this.el.remove();
