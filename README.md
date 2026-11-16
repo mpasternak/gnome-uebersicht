@@ -117,8 +117,11 @@ CI runs all of the above on every push and builds the extension zip; pushing a
 
 This is an independent reimplementation of the Übersicht widget API for GNOME;
 it shares no code with [Übersicht](https://github.com/felixhageloh/uebersicht)
-by Felix Hageloh, and is not affiliated with or endorsed by it. All credit for
-the widget model goes to the original project.
+by Felix Hageloh, and is not affiliated with it. All credit for the widget
+model goes to the original project.
+
+Felix Hageloh, the author of Übersicht, has
+[given this port an official blessing](https://github.com/felixhageloh/uebersicht/issues/555#issuecomment-6913090237).
 
 ## License
 
